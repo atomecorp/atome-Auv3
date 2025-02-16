@@ -4,16 +4,18 @@
 ////
 ////  Created by jeezs on 26/04/2022.
 ////
-//
+
 
 import WebKit
 
 class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     static let shared = WebViewManager()
     static var webView: WKWebView?
+    static weak var audioController: AudioControllerProtocol?
 
-    static func setupWebView(for webView: WKWebView) {
+    static func setupWebView(for webView: WKWebView, audioController: AudioControllerProtocol? = nil) {
         self.webView = webView
+        self.audioController = audioController
         webView.navigationDelegate = WebViewManager.shared
 
         let scriptSource = """
@@ -33,7 +35,6 @@ class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
                 console.warn("Error sending to Swift:", x);
             }
         });
-        console.log("JavaScript loaded successfully!");
         """
 
         let contentController = webView.configuration.userContentController
@@ -44,13 +45,10 @@ class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
         webView.configuration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
         webView.configuration.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
-        print("webview initialized")
         
         let myProjectBundle: Bundle = Bundle.main
         if let myUrl = myProjectBundle.url(forResource: "view/index", withExtension: "html") {
             webView.loadFileURL(myUrl, allowingReadAccessTo: myUrl)
-        } else {
-            print("Error: Could not find index.html in bundle.")
         }
     }
 
@@ -78,87 +76,65 @@ class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         case "log":
             if let message = data as? String {
                 print("JS Log: \(message)")
-            } else {
-                print("JS Log: \(data)")
             }
             
-        case "my_swit_method":
-            if let userData = data as? [String: String],
-               let user = userData["user"],
-               let action = userData["action"] {
-                handleUserAction(user: user, action: action)
-            }
+        case "toggleMute":
+            WebViewManager.audioController?.toggleMute()
+            sendMuteStateToJS()
             
         case "performCalculation":
             if let numbers = data as? [Int] {
                 performCalculation(numbers)
             }
             
-        case "saveData":
-            if let errorMessage = data as? String {
-                handleError(message: errorMessage)
-            }
-            
         default:
-            print("Message reçu non géré - Type: \(type), Data: \(data)")
+            print("Message non géré - Type: \(type), Data: \(data)")
         }
     }
     
+    private func sendMuteStateToJS() {
+        if let isMuted = WebViewManager.audioController?.isMuted {
+            let state = ["muted": isMuted]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: state),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                WebViewManager.sendToJS(jsonString, "updateAudioState")
+            }
+        }
+    }
 
     public static func sendToJS(_ message: Any, _ function: String) {
         var jsValue: String
-
         if let stringValue = message as? String {
              jsValue = "\"" + stringValue.replacingOccurrences(of: "\"", with: "\\\"") + "\""
-         } else if let jsonData = try? JSONSerialization.data(withJSONObject: message, options: []),
-                   let jsonString = String(data: jsonData, encoding: .utf8) {
+        } else if let jsonData = try? JSONSerialization.data(withJSONObject: message, options: []),
+                  let jsonString = String(data: jsonData, encoding: .utf8) {
              jsValue = jsonString
-         } else {
+        } else {
              jsValue = "\(message)"
-         }
+        }
 
-         let jsCode = """
-         if (typeof \(function) === 'function') {
-             console.log("\(function) is defined, calling it with:", \(jsValue));
-             \(function)(\(jsValue));
-         } else {
-             console.error("\(function) is not defined!");
-         }
-         """
+        let jsCode = """
+        if (typeof \(function) === 'function') {
+            console.log("\(function) is defined, calling it with:", \(jsValue));
+            \(function)(\(jsValue));
+        } else {
+            console.error("\(function) is not defined!");
+        }
+        """
 
         webView?.evaluateJavaScript(jsCode) { result, error in
             if let error = error {
                 print("JS Error (\(function)): \(error.localizedDescription)")
-            } else {
-                print("JS Executed (\(function)): \(String(describing: result))")
             }
         }
     }
 
- 
-    
-    // For tests only
-    
-    
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("Page web chargée avec succès")
         WebViewManager.sendToJS("test", "creerDivRouge")
     }
     
-    
-    private func handleUserAction(user: String, action: String) {
-   
-    }
-    
     private func performCalculation(_ numbers: [Int]) {
         print("Calcul avec les nombres: \(numbers)")
-
     }
-
-    
-    public func handleError(message: String) {
-        print("Erreur reçue: \(message)")
-    }
-    
-
 }
