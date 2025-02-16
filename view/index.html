@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="EN">
+<head>
+  <meta charset="UTF-8">
+<title>Page Ruby2JS Interactive</title>
+
+  <style>
+    body {
+      font-family: 'Arial, sans-serif',serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background-color: #f8f9fa;
+      padding: 10px;
+      text-align: center;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+
+    footer {
+      background-color: #f8f9fa;
+      padding: 10px;
+      text-align: center;
+      position: sticky;
+      bottom: 0;
+      width: 100%;
+    }
+
+    .content {
+      padding: 20px;
+      text-align: center;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    nav {
+      margin: 10px;
+    }
+
+  </style>
+</head>
+
+<body>
+    <h1>Web view initialized</h1>
+</body>
+<script>
+    // Redefined console.log
+    window.console.log=(function(oldLog){
+        return function(message){
+            oldLog(message)
+            try{window.webkit.messageHandlers.console.postMessage("LOG: "+message)}
+            catch(e){oldLog()}
+        }
+    })(window.console.log)
+
+    window.console.error=(function(oldErr){
+        return function(message){
+            oldErr(message)
+            try{window.webkit.messageHandlers.console.postMessage("ERROR: "+message)}
+            catch(e){oldErr()}
+        }
+    })(window.console.error)
+// comunication with swift
+    document.addEventListener("DOMContentLoaded", function() {
+       // console.log("DOM fully loaded and parsed");
+
+        window.sendToSwift = function(message, type = "log") {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.swiftBridge) {
+                try {
+                    let payload = {
+                        type: type,
+                        data: message
+                    };
+                    window.webkit.messageHandlers.swiftBridge.postMessage(payload);
+                } catch (error) {
+                    console.error("Error sending message to Swift:", error);
+                }
+            } else {
+                console.warn("Swift bridge is not available.");
+            }
+        };
+
+// verifications
+
+sendToSwift("Hello from JavaScript");
+sendToSwift({ user: "atome", action: "login" }, "saveData");
+sendToSwift([1, 2, 3, 4], "performCalculation");
+sendToSwift("An error occurred", "error");
+    });
+    
+    function creerDivRouge(val) {
+        console.log(val);
+
+        const newDiv = document.createElement('div');
+
+        newDiv.style.width = '100px';
+        newDiv.style.height = '100px';
+        newDiv.style.backgroundColor = 'red';
+        newDiv.style.margin = '10px';
+
+        newDiv.addEventListener('click', function() {
+
+           if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.swiftBridge) {
+               sendToSwift("div rouge touched!!");
+           } else {
+               console.error("Swift bridge not available");
+           }
+           sendToSwift([9, 6, 3, 0], "performCalculation");
+        });
+
+        document.body.appendChild(newDiv);
+    }
+    
+    
+    setTimeout(function() {
+        console.log("hello from JS !");
+    }, 2000);
+
+    </script>
+
+</html>
