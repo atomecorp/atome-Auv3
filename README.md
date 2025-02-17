@@ -14,7 +14,7 @@ clean build install
 
 
 
-Hierarchy:
+Here is the hierarchy of the project:
 
 atome-Auv3/
 .DS_Store

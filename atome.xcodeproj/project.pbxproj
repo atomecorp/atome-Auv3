@@ -40,6 +40,8 @@
 		349603E42818619000E13C15 /* atome.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = atome.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		349603FF281861B500E13C15 /* atomeAudioUnit.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = atomeAudioUnit.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		34960426281861EE00E13C15 /* view */ = {isa = PBXFileReference; lastKnownFileType = folder; path = view; sourceTree = "<group>"; };
+		6BB7DA3B2D63233600CD6691 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		6BB7DA3C2D63233600CD6691 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -92,6 +94,8 @@
 				6B864DBD2D5DDA74006DEA72 /* application */,
 				6B864DC82D5DDDD7006DEA72 /* auv3 */,
 				349603E52818619000E13C15 /* Products */,
+				6BB7DA3B2D63233600CD6691 /* LICENSE */,
+				6BB7DA3C2D63233600CD6691 /* README.md */,
 			);
 			sourceTree = "<group>";
 		};
