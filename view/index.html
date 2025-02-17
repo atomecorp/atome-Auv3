@@ -42,10 +42,16 @@
             margin: 10px;
         }
 
+        .control-container {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
         .audio-control {
             width: 100px;
             height: 100px;
-            background-color: #444;
             margin: 10px auto;
             cursor: pointer;
             display: flex;
@@ -58,8 +64,30 @@
             transition: background-color 0.3s;
         }
 
-        .audio-control:hover {
-            background-color: #555;
+        .test-control {
+            width: 120px;
+            height: 120px;
+            background-color: #4CAF50;
+            margin: 10px auto;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-family: Arial, sans-serif;
+            user-select: none;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        .test-control:hover {
+            opacity: 0.9;
+            transform: scale(1.02);
+        }
+
+        .test-control.running {
+            background-color: #ff4444;
         }
 
         .visualization-container {
@@ -102,16 +130,28 @@
             font-size: 0.8em;
             color: #888;
         }
+
+        .status-indicator {
+            font-size: 0.8em;
+            margin-top: 5px;
+            color: #888;
+        }
     </style>
 </head>
 <body>
     <header>
-        <h1>Audio Visualization</h1>
+        <h1>Audio Visualization & Test</h1>
     </header>
 
     <div class="content">
-        <div id="audioControl" class="audio-control">
-            UNMUTED
+        <div class="control-container">
+            <div id="audioControl" class="audio-control">
+                UNMUTED
+            </div>
+            <div id="testControl" class="test-control">
+                RUN TEST
+                <div class="status-indicator"></div>
+            </div>
         </div>
 
         <div class="visualization-container">
@@ -129,30 +169,89 @@
                     <div id="zeroCrossings" class="metric-value">0</div>
                     <div class="metric-label">Zero Crossings</div>
                 </div>
+                <div class="metric">
+                    <div id="testFrequency" class="metric-value">440</div>
+                    <div class="metric-label">Test Freq (Hz)</div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Redefined console.log
-        window.console.log=(function(oldLog){
-            return function(message){
-                oldLog(message)
-                try{window.webkit.messageHandlers.console.postMessage("LOG: "+message)}
-                catch(e){oldLog()}
+        // AudioWorklet code
+        const audioWorkletCode = `
+            class TestToneProcessor extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.phase = 0;
+                    this.isPlaying = false;
+                    this.frequency = 440;
+                    this.currentSampleRate = sampleRate;
+                    
+                    this.port.onmessage = (event) => {
+                        if (event.data.type === 'toggle') {
+                            this.isPlaying = event.data.value;
+                        } else if (event.data.type === 'sampleRate') {
+                            this.currentSampleRate = event.data.value;
+                            console.log("Worklet received sampleRate:", this.currentSampleRate);
+                        }
+                    };
+                }
+                
+                process(inputs, outputs, parameters) {
+                    const output = outputs[0];
+                    const phaseIncrement = 2 * Math.PI * this.frequency / this.currentSampleRate;
+                    
+                    for (let channel = 0; channel < output.length; ++channel) {
+                        const outputChannel = output[channel];
+                        for (let i = 0; i < outputChannel.length; ++i) {
+                            if (this.isPlaying) {
+                                outputChannel[i] = Math.sin(this.phase) * 0.5;
+                                this.phase += phaseIncrement;
+                                if (this.phase >= 2 * Math.PI) {
+                                    this.phase -= 2 * Math.PI;
+                                }
+                            } else {
+                                outputChannel[i] = 0;
+                            }
+                        }
+                    }
+                    return true;
+                }
             }
-        })(window.console.log)
+            registerProcessor('test-tone-processor', TestToneProcessor);
+        `;
 
-        window.console.error=(function(oldErr){
-            return function(message){
-                oldErr(message)
-                try{window.webkit.messageHandlers.console.postMessage("ERROR: "+message)}
-                catch(e){oldErr()}
+        // Console redefinition
+        window.console.log = (function(oldLog) {
+            return function(message) {
+                oldLog(message);
+                try {
+                    window.webkit.messageHandlers.console.postMessage("LOG: " + message);
+                } catch(e) {
+                    oldLog();
+                }
             }
-        })(window.console.error)
+        })(window.console.log);
 
-        // Communication with swift
-        document.addEventListener("DOMContentLoaded", function() {
+        window.console.error = (function(oldErr) {
+            return function(message) {
+                oldErr(message);
+                try {
+                    window.webkit.messageHandlers.console.postMessage("ERROR: " + message);
+                } catch(e) {
+                    oldErr();
+                }
+            }
+        })(window.console.error);
+
+        // Swift communication
+        let audioContext = null;
+        let testNode = null;
+        let isTestPlaying = false;
+        let hostSampleRate = null;
+
+        document.addEventListener("DOMContentLoaded", async function() {
             window.sendToSwift = function(message, type = "log") {
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.swiftBridge) {
                     try {
@@ -169,16 +268,42 @@
                 }
             };
 
+            // Demander le sampleRate à Swift
+            sendToSwift({ type: "getSampleRate" }, "getSampleRate");
+
+            // Initialize AudioContext and AudioWorklet
+            try {
+                audioContext = new AudioContext();
+                const blob = new Blob([audioWorkletCode], { type: 'application/javascript' });
+                const workletUrl = URL.createObjectURL(blob);
+                await audioContext.audioWorklet.addModule(workletUrl);
+                testNode = new AudioWorkletNode(audioContext, 'test-tone-processor');
+                //testNode.connect(audioContext.destination);
+                console.log("AudioWorklet initialized successfully");
+            } catch (error) {
+                console.error("Failed to initialize AudioWorklet:", error);
+            }
+
             // Initial verifications
-            sendToSwift("Hello from JavaScript");
-            sendToSwift({ user: "atome", action: "login" }, "saveData");
-            sendToSwift([1, 2, 3, 4], "performCalculation");
-            sendToSwift("An error occurred", "error");
+            sendToSwift("Audio system initialized");
         });
+
+        // Function to update sample rate
+        function updateSampleRate(sampleRate) {
+            hostSampleRate = sampleRate;
+            if (testNode && sampleRate) {
+                testNode.port.postMessage({
+                    type: 'sampleRate',
+                    value: sampleRate
+                });
+                console.log("Updated sample rate to:", sampleRate);
+            }
+        }
 
         // Audio control state management
         let isMuted = true;
         const audioControl = document.getElementById('audioControl');
+        const testControl = document.getElementById('testControl');
 
         function updateAudioState(state) {
             if (typeof state === 'string') {
@@ -187,6 +312,33 @@
             isMuted = state.muted;
             audioControl.textContent = isMuted ? 'MUTED' : 'UNMUTED';
             audioControl.style.backgroundColor = isMuted ? '#ff4444' : '#4CAF50';
+        }
+
+        async function toggleTestTone() {
+            if (!audioContext) {
+                console.error("AudioContext not initialized");
+                return;
+            }
+
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            isTestPlaying = !isTestPlaying;
+            testControl.textContent = isTestPlaying ? 'STOP TEST' : 'RUN TEST';
+            testControl.classList.toggle('running', isTestPlaying);
+
+            if (testNode) {
+                testNode.port.postMessage({
+                    type: 'toggle',
+                    value: isTestPlaying
+                });
+            }
+
+            sendToSwift({
+                isPlaying: isTestPlaying,
+                frequency: 440
+            }, "audioTest");
         }
 
         function creerDivRouge(val) {
@@ -201,12 +353,11 @@
             }
         }
 
-        // Audio visualization setup
+        // Canvas setup and audio visualization
         const canvas = document.getElementById('audioVisualization');
         const ctx = canvas.getContext('2d');
         let animationFrameId;
 
-        // Handle window resize
         function resizeCanvas() {
             const dpr = window.devicePixelRatio || 1;
             const rect = canvas.getBoundingClientRect();
@@ -218,7 +369,6 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // Audio visualization function
         function updateAudioVisualization(audioData) {
             if (typeof audioData === 'string') {
                 audioData = JSON.parse(audioData);
@@ -245,8 +395,6 @@
             const sliceWidth = rect.width / data.length;
             let x = 0;
 
-            ctx.moveTo(x, rect.height / 2);
-
             for (let i = 0; i < data.length; i++) {
                 const v = data[i];
                 const y = (v * rect.height / 2) + rect.height / 2;
@@ -260,7 +408,6 @@
                 x += sliceWidth;
             }
 
-            ctx.lineTo(rect.width, rect.height / 2);
             ctx.stroke();
 
             // Draw background grid
@@ -284,7 +431,7 @@
             }
         }
 
-        // Audio control click handler
+        // Event Listeners
         audioControl.addEventListener('click', function() {
             if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.swiftBridge) {
                 sendToSwift({
@@ -296,9 +443,11 @@
             }
         });
 
+        testControl.addEventListener('click', toggleTestTone);
+
         // Initial state setup
         updateAudioState({ muted: true });
-        
+                           
         setTimeout(function() {
             console.log("hello from JS !");
         }, 2000);

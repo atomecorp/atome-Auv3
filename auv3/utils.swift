@@ -15,11 +15,18 @@ protocol AudioDataDelegate: AnyObject {
 }
 
 public class auv3Utils: AUAudioUnit {
+    // MARK: - Properties
+    
     private var _outputBusArray: AUAudioUnitBusArray!
     private var _inputBusArray: AUAudioUnitBusArray!
     private var isMuted: Bool = false
     private var audioLogger: FileHandle?
     private var isLogging: Bool = false
+    
+    // Test tone properties
+    private var isTestToneActive: Bool = false
+    private var testToneFrequency: Double = 440.0
+    private var testTonePhase: Double = 0.0
     
     // Audio visualization properties
     weak var audioDataDelegate: AudioDataDelegate?
@@ -56,24 +63,48 @@ public class auv3Utils: AUAudioUnit {
         }
     }
     
-    // essential function for rendering
+    // MARK: - Audio Processing
+    
     public override var internalRenderBlock: AUInternalRenderBlock {
         return { [weak self] actionFlags, timestamp, frameCount, outputBusNumber, outputData, realtimeEventListHead, pullInputBlock in
             guard let strongSelf = self else { return kAudioUnitErr_NoConnection }
-            guard let pullInputBlock = pullInputBlock else {
-                return kAudioUnitErr_NoConnection
-            }
-
-            var inputTimestamp = AudioTimeStamp()
-            let inputBusNumber: Int = 0
-
-            let inputStatus = pullInputBlock(actionFlags, &inputTimestamp, frameCount, inputBusNumber, outputData)
-
-            if inputStatus != noErr {
-                return inputStatus
-            }
-
+            
             var bufferList = AudioBufferListWrapper(ptr: outputData)
+            
+            // Generate test tone if active
+            if strongSelf.isTestToneActive {
+                let sampleRate = strongSelf.getSampleRate() ?? 44100.0
+                
+                for i in 0..<bufferList.numberOfBuffers {
+                    let buffer = bufferList.buffer(at: i)
+                    if let mData = buffer.mData {
+                        let floatData = mData.assumingMemoryBound(to: Float.self)
+                        let dataCount = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                        
+                        for frame in 0..<dataCount {
+                            strongSelf.testTonePhase += 2.0 * Double.pi * strongSelf.testToneFrequency / sampleRate
+                            if strongSelf.testTonePhase >= 2.0 * Double.pi {
+                                strongSelf.testTonePhase -= 2.0 * Double.pi
+                            }
+                            floatData[frame] = Float(sin(strongSelf.testTonePhase) * 0.5)
+                        }
+                    }
+                }
+            } else {
+                // Normal audio processing
+                guard let pullInputBlock = pullInputBlock else {
+                    return kAudioUnitErr_NoConnection
+                }
+
+                var inputTimestamp = AudioTimeStamp()
+                let inputBusNumber: Int = 0
+
+                let inputStatus = pullInputBlock(actionFlags, &inputTimestamp, frameCount, inputBusNumber, outputData)
+
+                if inputStatus != noErr {
+                    return inputStatus
+                }
+            }
 
             // Log audio data if logging is enabled
             if strongSelf.isLogging, let logger = strongSelf.audioLogger {
@@ -106,7 +137,7 @@ public class auv3Utils: AUAudioUnit {
                         }
                         
                         DispatchQueue.main.async {
-                            strongSelf.audioDataDelegate?.didReceiveAudioData(visualizationData, timestamp: inputTimestamp.mSampleTime)
+                            strongSelf.audioDataDelegate?.didReceiveAudioData(visualizationData, timestamp: Double(timestamp.pointee.mSampleTime))
                         }
                     }
                 }
@@ -130,6 +161,8 @@ public class auv3Utils: AUAudioUnit {
         }
     }
 
+    // MARK: - Musical Context and Transport
+    
     public override var musicalContextBlock: AUHostMusicalContextBlock? {
         get {
             return super.musicalContextBlock
@@ -139,70 +172,6 @@ public class auv3Utils: AUAudioUnit {
         }
     }
     
-    // Add mute utilities
-    public var mute: Bool {
-        get { return isMuted }
-        set { isMuted = newValue }
-    }
-    
-    // Add logging control
-    public var logging: Bool {
-        get { return isLogging }
-        set {
-            if newValue != isLogging {
-                if newValue {
-                    startLogging()
-                } else {
-                    stopLogging()
-                }
-                isLogging = newValue
-            }
-        }
-    }
-    
-    private func startLogging() {
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        let timestamp = dateFormatter.string(from: Date())
-        let logPath = documentsPath.appendingPathComponent("audio_log_\(timestamp).raw")
-        
-        FileManager.default.createFile(atPath: logPath.path, contents: nil)
-        audioLogger = try? FileHandle(forWritingTo: logPath)
-        
-        print("Started audio logging to: \(logPath.path)")
-    }
-    
-    private func stopLogging() {
-        audioLogger?.closeFile()
-        audioLogger = nil
-        print("Stopped audio logging")
-    }
-    
-    // busses handling
-    override public var inputBusses: AUAudioUnitBusArray {
-        return _inputBusArray
-    }
-
-    override public var outputBusses: AUAudioUnitBusArray {
-        return _outputBusArray
-    }
-
-    public override init(componentDescription: AudioComponentDescription,
-                         options: AudioComponentInstantiationOptions = []) throws {
-        try super.init(componentDescription: componentDescription, options: options)
-
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
-
-        _inputBusArray = AUAudioUnitBusArray(audioUnit: self,
-                                             busType: .input,
-                                             busses: [try AUAudioUnitBus(format: format)])
-
-        _outputBusArray = AUAudioUnitBusArray(audioUnit: self,
-                                              busType: .output,
-                                              busses: [try AUAudioUnitBus(format: format)])
-    }
-
     private func checkHostTransport() {
         if let transportStateBlock = self.transportStateBlock {
             var transportStateChanged = AUHostTransportStateFlags(rawValue: 0)
@@ -225,15 +194,12 @@ public class auv3Utils: AUAudioUnit {
                         }
                     }
                 }
-            } else {
-                print("Failed to retrieve transport state")
             }
         }
     }
   
     private func checkHostTempo() {
         guard let contextBlock = self.musicalContextBlock else {
-            print("No musical context block available")
             return
         }
 
@@ -261,6 +227,93 @@ public class auv3Utils: AUAudioUnit {
             }
         }
     }
+    
+    // MARK: - Bus Configuration
+    
+    override public var inputBusses: AUAudioUnitBusArray {
+        return _inputBusArray
+    }
+
+    override public var outputBusses: AUAudioUnitBusArray {
+        return _outputBusArray
+    }
+
+    // MARK: - Initialization
+
+    public override init(componentDescription: AudioComponentDescription,
+                         options: AudioComponentInstantiationOptions = []) throws {
+        try super.init(componentDescription: componentDescription, options: options)
+
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+
+        _inputBusArray = AUAudioUnitBusArray(audioUnit: self,
+                                             busType: .input,
+                                             busses: [try AUAudioUnitBus(format: format)])
+
+        _outputBusArray = AUAudioUnitBusArray(audioUnit: self,
+                                              busType: .output,
+                                              busses: [try AUAudioUnitBus(format: format)])
+    }
+
+    // MARK: - Test Tone Control
+    
+    public func startTestTone(frequency: Double = 440.0) {
+        isTestToneActive = true
+        testToneFrequency = frequency
+        testTonePhase = 0.0
+    }
+    
+    public func stopTestTone() {
+        isTestToneActive = false
+    }
+    
+    public func updateTestToneFrequency(_ frequency: Double) {
+        testToneFrequency = frequency
+    }
+    
+    // MARK: - Audio Control Properties
+    
+    public var mute: Bool {
+        get { return isMuted }
+        set { isMuted = newValue }
+    }
+    
+    public var logging: Bool {
+        get { return isLogging }
+        set {
+            if newValue != isLogging {
+                if newValue {
+                    startLogging()
+                } else {
+                    stopLogging()
+                }
+                isLogging = newValue
+            }
+        }
+    }
+    
+    // MARK: - Logging
+    
+    private func startLogging() {
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        let timestamp = dateFormatter.string(from: Date())
+        let logPath = documentsPath.appendingPathComponent("audio_log_\(timestamp).raw")
+        
+        FileManager.default.createFile(atPath: logPath.path, contents: nil)
+        audioLogger = try? FileHandle(forWritingTo: logPath)
+        
+        print("Started audio logging to: \(logPath.path)")
+    }
+    
+    private func stopLogging() {
+        audioLogger?.closeFile()
+        audioLogger = nil
+        print("Stopped audio logging")
+    }
+    
+    // MARK: - Utility Methods
     
     func getSampleRate() -> Double? {
         guard outputBusses.count > 0 else {

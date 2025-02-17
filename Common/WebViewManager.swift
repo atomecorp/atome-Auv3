@@ -51,7 +51,8 @@ public class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         }
     }
 
-    // Making this method public as required by WKScriptMessageHandler protocol
+    // MARK: - WKScriptMessageHandler
+
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "console":
@@ -82,6 +83,20 @@ public class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDeleg
             WebViewManager.audioController?.toggleMute()
             sendMuteStateToJS()
             
+        case "audioTest":
+            if let testData = data as? [String: Any],
+               let isPlaying = testData["isPlaying"] as? Bool,
+               let frequency = testData["frequency"] as? Double {
+                WebViewManager.audioController?.handleTestToneState(isPlaying: isPlaying, frequency: frequency)
+                sendTestStateToJS() // AJOUT: Envoi de l'état mis à jour
+            }
+            
+        case "updateTestFrequency":
+            if let frequency = data as? Double {
+                WebViewManager.audioController?.setTestFrequency(frequency)
+                sendTestStateToJS() // AJOUT: Envoi de l'état mis à jour
+            }
+            
         case "performCalculation":
             if let numbers = data as? [Int] {
                 performCalculation(numbers)
@@ -101,6 +116,20 @@ public class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDeleg
             }
         }
     }
+    
+    private func sendTestStateToJS() {
+        guard let audioController = WebViewManager.audioController else { return }
+        
+        let state: [String: Any] = [
+            "isTestActive": audioController.isTestActive,
+            "frequency": audioController.currentTestFrequency
+        ]
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: state),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            WebViewManager.sendToJS(jsonString, "updateTestState")
+        }
+    }
 
     public static func sendToJS(_ message: Any, _ function: String) {
         var jsValue: String
@@ -115,7 +144,7 @@ public class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
         let jsCode = """
         if (typeof \(function) === 'function') {
-            console.log("\(function) is defined, calling it with:", \(jsValue));
+            //console.log("\(function) is defined, calling it with:", \(jsValue));
             \(function)(\(jsValue));
         } else {
             console.error("\(function) is not defined!");
@@ -129,10 +158,14 @@ public class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         }
     }
 
-    // Making this method public as required by WKNavigationDelegate protocol
+    // MARK: - WKNavigationDelegate
+
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("Page web chargée avec succès")
         WebViewManager.sendToJS("test", "creerDivRouge")
+        // AJOUT: Envoyer les états initiaux après le chargement de la page
+        sendMuteStateToJS()
+        sendTestStateToJS()
     }
     
     private func performCalculation(_ numbers: [Int]) {
