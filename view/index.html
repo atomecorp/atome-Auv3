@@ -278,6 +278,7 @@
                 const workletUrl = URL.createObjectURL(blob);
                 await audioContext.audioWorklet.addModule(workletUrl);
                 testNode = new AudioWorkletNode(audioContext, 'test-tone-processor');
+                // uncpmment to connect to send audio to the system instead of the AUV3 plugin
                 //testNode.connect(audioContext.destination);
                 console.log("AudioWorklet initialized successfully");
             } catch (error) {
