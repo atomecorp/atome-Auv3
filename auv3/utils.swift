@@ -8,12 +8,25 @@
 import AVFoundation
 import Foundation
 
+// Protocol for real-time audio data delegation
+protocol AudioDataDelegate: AnyObject {
+    func didReceiveAudioData(_ data: [Float], timestamp: Double)
+}
+
 public class auv3Utils: AUAudioUnit {
     private var _outputBusArray: AUAudioUnitBusArray!
     private var _inputBusArray: AUAudioUnitBusArray!
     private var isMuted: Bool = false
     private var audioLogger: FileHandle?
     private var isLogging: Bool = false
+    
+    // Audio visualization properties
+    weak var audioDataDelegate: AudioDataDelegate?
+    private let audioBufferSize = 1024
+    private var audioBuffer = [Float](repeating: 0, count: 1024)
+    private var bufferIndex = 0
+    private var lastVisualizationUpdate: TimeInterval = 0
+    private let visualizationUpdateInterval: TimeInterval = 1.0 / 30.0 // 30 FPS update rate
     
     // essential function for rendering
     public override var internalRenderBlock: AUInternalRenderBlock {
@@ -42,6 +55,37 @@ public class auv3Utils: AUAudioUnit {
                         try? logger.write(contentsOf: data)
                     }
                 }
+            }
+
+            // Process audio data for visualization with rate limiting
+            let currentTime = CACurrentMediaTime()
+            if currentTime - strongSelf.lastVisualizationUpdate >= strongSelf.visualizationUpdateInterval {
+                let numBuffers = Int(outputData.pointee.mNumberBuffers)
+                for bufferIndex in 0..<numBuffers {
+                    let inBuffer = UnsafeMutableAudioBufferListPointer(outputData)[bufferIndex]
+                    if let inData = inBuffer.mData {
+                        // Convert audio data to float array for visualization
+                        let floatData = inData.assumingMemoryBound(to: Float.self)
+                        let count = Int(inBuffer.mDataByteSize) / MemoryLayout<Float>.size
+                        
+                        // Process and downsample data for visualization
+                        var visualizationData = [Float]()
+                        let downsampleFactor = max(1, count / strongSelf.audioBufferSize)
+                        
+                        for i in stride(from: 0, to: count, by: downsampleFactor) {
+                            let sum = (0..<downsampleFactor)
+                                .map { j in i + j < count ? abs(floatData[i + j]) : 0 }
+                                .reduce(0, +)
+                            visualizationData.append(sum / Float(downsampleFactor))
+                        }
+                        
+                        // Send downsampled data to delegate
+                        DispatchQueue.main.async {
+                            strongSelf.audioDataDelegate?.didReceiveAudioData(visualizationData, timestamp: inputTimestamp.mSampleTime)
+                        }
+                    }
+                }
+                strongSelf.lastVisualizationUpdate = currentTime
             }
 
             // Handle muting
@@ -123,13 +167,13 @@ public class auv3Utils: AUAudioUnit {
     }
     
     // busses handling
-        override public var inputBusses: AUAudioUnitBusArray {
-            return _inputBusArray
-        }
+    override public var inputBusses: AUAudioUnitBusArray {
+        return _inputBusArray
+    }
 
-        override public var outputBusses: AUAudioUnitBusArray {
-            return _outputBusArray
-        }
+    override public var outputBusses: AUAudioUnitBusArray {
+        return _outputBusArray
+    }
 
     public override init(componentDescription: AudioComponentDescription,
                          options: AudioComponentInstantiationOptions = []) throws {
@@ -145,8 +189,6 @@ public class auv3Utils: AUAudioUnit {
                                               busType: .output,
                                               busses: [try AUAudioUnitBus(format: format)])
     }
-
-
 
     // utility to report some host events
     private func checkHostTransport() {

@@ -57,12 +57,8 @@
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES"
       launchAutomaticallySubstyle = "2">
-      <RemoteRunnable
-         runnableDebuggingMode = "0"
-         BundleIdentifier = "com.atastypixel.Loopy-Pro"
-         RemotePath = "/var/containers/Bundle/Application/4CAF67C3-B4B9-46B2-A708-997911201F9A/Loopy Pro.app">
-      </RemoteRunnable>
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "349603E32818619000E13C15"
@@ -70,7 +66,7 @@
             BlueprintName = "atome"
             ReferencedContainer = "container:atome.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

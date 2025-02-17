@@ -5,10 +5,9 @@
 ////  Created by jeezs on 26/04/2022.
 ////
 
-
 import WebKit
 
-class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+public class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     static let shared = WebViewManager()
     static var webView: WKWebView?
     static weak var audioController: AudioControllerProtocol?
@@ -52,7 +51,8 @@ class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         }
     }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    // Making this method public as required by WKScriptMessageHandler protocol
+    public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "console":
             if let messageBody = message.body as? String {
@@ -129,7 +129,8 @@ class WebViewManager: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         }
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    // Making this method public as required by WKNavigationDelegate protocol
+    public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("Page web chargée avec succès")
         WebViewManager.sendToJS("test", "creerDivRouge")
     }

@@ -8,7 +8,7 @@
 import Foundation
 
 public protocol AudioControllerProtocol: AnyObject {
+    var isMuted: Bool { get }
     func toggleMute()
     func setMute(_ muted: Bool)
-    var isMuted: Bool { get }
 }
