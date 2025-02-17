@@ -7,6 +7,7 @@
 
 import AVFoundation
 import Foundation
+import CoreAudio
 
 // Protocol for real-time audio data delegation
 protocol AudioDataDelegate: AnyObject {
@@ -27,6 +28,33 @@ public class auv3Utils: AUAudioUnit {
     private var bufferIndex = 0
     private var lastVisualizationUpdate: TimeInterval = 0
     private let visualizationUpdateInterval: TimeInterval = 1.0 / 30.0 // 30 FPS update rate
+
+    // Custom AudioBufferList wrapper
+    private struct AudioBufferListWrapper {
+        let ptr: UnsafeMutablePointer<AudioBufferList>
+        
+        var numberOfBuffers: Int {
+            Int(ptr.pointee.mNumberBuffers)
+        }
+        
+        func buffer(at index: Int) -> AudioBuffer {
+            precondition(index < numberOfBuffers)
+            return withUnsafePointer(to: &ptr.pointee.mBuffers) { buffers in
+                buffers.withMemoryRebound(to: AudioBuffer.self, capacity: numberOfBuffers) { reboundBuffers in
+                    reboundBuffers[index]
+                }
+            }
+        }
+        
+        mutating func setBuffer(at index: Int, _ buffer: AudioBuffer) {
+            precondition(index < numberOfBuffers)
+            withUnsafeMutablePointer(to: &ptr.pointee.mBuffers) { buffers in
+                buffers.withMemoryRebound(to: AudioBuffer.self, capacity: numberOfBuffers) { reboundBuffers in
+                    reboundBuffers[index] = buffer
+                }
+            }
+        }
+    }
     
     // essential function for rendering
     public override var internalRenderBlock: AUInternalRenderBlock {
@@ -45,13 +73,14 @@ public class auv3Utils: AUAudioUnit {
                 return inputStatus
             }
 
+            var bufferList = AudioBufferListWrapper(ptr: outputData)
+
             // Log audio data if logging is enabled
             if strongSelf.isLogging, let logger = strongSelf.audioLogger {
-                let numBuffers = Int(outputData.pointee.mNumberBuffers)
-                for bufferIndex in 0..<numBuffers {
-                    let inBuffer = UnsafeMutableAudioBufferListPointer(outputData)[bufferIndex]
-                    if let inData = inBuffer.mData {
-                        let data = Data(bytes: inData, count: Int(inBuffer.mDataByteSize))
+                for i in 0..<bufferList.numberOfBuffers {
+                    let buffer = bufferList.buffer(at: i)
+                    if let inData = buffer.mData {
+                        let data = Data(bytes: inData, count: Int(buffer.mDataByteSize))
                         try? logger.write(contentsOf: data)
                     }
                 }
@@ -60,15 +89,12 @@ public class auv3Utils: AUAudioUnit {
             // Process audio data for visualization with rate limiting
             let currentTime = CACurrentMediaTime()
             if currentTime - strongSelf.lastVisualizationUpdate >= strongSelf.visualizationUpdateInterval {
-                let numBuffers = Int(outputData.pointee.mNumberBuffers)
-                for bufferIndex in 0..<numBuffers {
-                    let inBuffer = UnsafeMutableAudioBufferListPointer(outputData)[bufferIndex]
-                    if let inData = inBuffer.mData {
-                        // Convert audio data to float array for visualization
+                for i in 0..<bufferList.numberOfBuffers {
+                    let buffer = bufferList.buffer(at: i)
+                    if let inData = buffer.mData {
                         let floatData = inData.assumingMemoryBound(to: Float.self)
-                        let count = Int(inBuffer.mDataByteSize) / MemoryLayout<Float>.size
+                        let count = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
                         
-                        // Process and downsample data for visualization
                         var visualizationData = [Float]()
                         let downsampleFactor = max(1, count / strongSelf.audioBufferSize)
                         
@@ -79,7 +105,6 @@ public class auv3Utils: AUAudioUnit {
                             visualizationData.append(sum / Float(downsampleFactor))
                         }
                         
-                        // Send downsampled data to delegate
                         DispatchQueue.main.async {
                             strongSelf.audioDataDelegate?.didReceiveAudioData(visualizationData, timestamp: inputTimestamp.mSampleTime)
                         }
@@ -90,20 +115,10 @@ public class auv3Utils: AUAudioUnit {
 
             // Handle muting
             if strongSelf.isMuted {
-                let numBuffers = Int(outputData.pointee.mNumberBuffers)
-                for bufferIndex in 0..<numBuffers {
-                    let outBuffer = UnsafeMutableAudioBufferListPointer(outputData)[bufferIndex]
-                    if let mData = outBuffer.mData {
-                        memset(mData, 0, Int(outBuffer.mDataByteSize))
-                    }
-                }
-            } else {
-                let numBuffers = Int(outputData.pointee.mNumberBuffers)
-                for bufferIndex in 0..<numBuffers {
-                    let inBuffer = UnsafeMutableAudioBufferListPointer(outputData)[bufferIndex]
-                    let outBuffer = UnsafeMutableAudioBufferListPointer(outputData)[bufferIndex]
-                    if let inData = inBuffer.mData, let outData = outBuffer.mData {
-                        memcpy(outData, inData, Int(inBuffer.mDataByteSize))
+                for i in 0..<bufferList.numberOfBuffers {
+                    let buffer = bufferList.buffer(at: i)
+                    if let mData = buffer.mData {
+                        memset(mData, 0, Int(buffer.mDataByteSize))
                     }
                 }
             }
@@ -124,13 +139,11 @@ public class auv3Utils: AUAudioUnit {
         }
     }
     
-
-    // Add mute  utilities
+    // Add mute utilities
     public var mute: Bool {
         get { return isMuted }
         set { isMuted = newValue }
     }
-
     
     // Add logging control
     public var logging: Bool {
@@ -190,7 +203,6 @@ public class auv3Utils: AUAudioUnit {
                                               busses: [try AUAudioUnitBus(format: format)])
     }
 
-    // utility to report some host events
     private func checkHostTransport() {
         if let transportStateBlock = self.transportStateBlock {
             var transportStateChanged = AUHostTransportStateFlags(rawValue: 0)
